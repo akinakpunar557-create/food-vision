@@ -1,4 +1,10 @@
 import streamlit as st
+
+st.set_page_config(
+    page_title="Food Vision",
+    page_icon="🍕",
+    layout="centered",
+)
 import torch
 from PIL import Image
 from timeit import default_timer as timer
@@ -74,11 +80,7 @@ def predict(img: Image.Image) -> Tuple[Dict, float]:
 # Streamlit UI
 # ============================================================
 
-st.set_page_config(
-    page_title="Food Vision",
-    page_icon="🍕",
-    layout="centered",
-)
+
 
 st.title(APP_TITLE)
 st.write(APP_DESCRIPTION)
