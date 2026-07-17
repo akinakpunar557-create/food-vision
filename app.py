@@ -100,7 +100,7 @@ if example_images:
 
     for col, example_path in zip(cols, example_images):
         with col:
-            st.image(example_path, use_container_width=True)
+            st.image(example_path, use_column_width=True)
 
             if st.button("Use Image", key=example_path):
                 st.session_state.selected_example = example_path
