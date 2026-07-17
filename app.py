@@ -119,7 +119,7 @@ elif st.session_state.selected_example is not None:
 
 if img is not None:
 
-    st.image(img, caption=caption, use_container_width=True)
+    st.image(img, caption=caption, use_column_width=True)
 
     with st.spinner("Predicting..."):
         pred_labels_and_probs, pred_time = predict(img)
