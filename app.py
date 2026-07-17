@@ -1,113 +1,152 @@
-### FoodVision Big — Streamlit app ###
-import os
-from timeit import default_timer as timer
-from typing import Dict, Tuple
-
 import streamlit as st
 import torch
 from PIL import Image
+from timeit import default_timer as timer
+from typing import Tuple, Dict
 
 from model import create_effnetb2_model
 
+# ============================================================
+# Setup
+# ============================================================
+
+with open("class_names.txt", "r") as f:
+    class_names = [food_name.strip() for food_name in f.readlines()]
+
 MODEL_WEIGHTS_PATH = "09_pretrained_effnetb2_feature_extractor_food101_20_percent.pth"
 
-# ---------- Setup (cached so it only runs once) ----------
+APP_TITLE = "🍽️ Food Vision"
+APP_DESCRIPTION = (
+    "Upload a food image and let an EfficientNetB2 model classify it!"
+)
+
+example_images = [
+    "static/pizza.jpg",
+]
+
+# ============================================================
+# Load model
+# ============================================================
 
 @st.cache_resource
-def load_model_and_transforms():
-    with open("class_names.txt", "r") as f:
-        class_names = [food_name.strip() for food_name in f.readlines()]
-
-    model, transforms = create_effnetb2_model(num_classes=len(class_names))
-
-    # Load trained weights (map to CPU since Streamlit Cloud has no GPU)
-    model.load_state_dict(
-        torch.load(f=MODEL_WEIGHTS_PATH, map_location=torch.device("cpu"))
+def load_model():
+    model, transforms = create_effnetb2_model(
+        num_classes=len(class_names)
     )
+
+    checkpoint = torch.load(
+        MODEL_WEIGHTS_PATH,
+        map_location="cpu",
+        weights_only=False
+    )
+
+    model.load_state_dict(checkpoint)
     model.eval()
 
-    return model, transforms, class_names
+    return model, transforms
 
 
-model, effnetb2_transforms, class_names = load_model_and_transforms()
+effnetb2, effnetb2_transforms = load_model()
 
-# ---------- Predict function ----------
+# ============================================================
+# Prediction
+# ============================================================
 
-def predict(img: Image.Image) -> Tuple[Dict[str, float], float]:
+def predict(img: Image.Image) -> Tuple[Dict, float]:
     start_time = timer()
 
-    img_transformed = effnetb2_transforms(img).unsqueeze(0)  # add batch dim
+    img_tensor = effnetb2_transforms(img).unsqueeze(0)
 
     with torch.inference_mode():
-        pred_probs = torch.softmax(model(img_transformed), dim=1)
+        pred_probs = torch.softmax(effnetb2(img_tensor), dim=1)
 
     pred_labels_and_probs = {
-        class_names[i]: float(pred_probs[0][i]) for i in range(len(class_names))
+        class_names[i]: float(pred_probs[0][i])
+        for i in range(len(class_names))
     }
 
     pred_time = round(timer() - start_time, 4)
+
     return pred_labels_and_probs, pred_time
 
 
-# ---------- UI ----------
+# ============================================================
+# Streamlit UI
+# ============================================================
 
-st.set_page_config(page_title="FoodVision Big", page_icon="🍔")
-
-st.title("FoodVision Big 🍔👁💪")
-st.markdown(
-    "An [EfficientNetB2 feature extractor]"
-    "(https://pytorch.org/vision/stable/models/generated/torchvision.models.efficientnet_b2.html) "
-    "computer vision model to classify images into "
-    "[101 classes of food from the Food101 dataset]"
-    "(https://github.com/mrdbourke/pytorch-deep-learning/blob/main/extras/food101_class_names.txt)."
+st.set_page_config(
+    page_title="Food Vision",
+    page_icon="🍕",
+    layout="centered",
 )
+
+st.title(APP_TITLE)
+st.write(APP_DESCRIPTION)
 
 uploaded_file = st.file_uploader(
-    "Upload a food image", type=["jpg", "jpeg", "png"]
+    "Upload a food image",
+    type=["jpg", "jpeg", "png"]
 )
 
-# Optional: example images shown as clickable thumbnails
-example_dir = "examples"
-selected_example = None
-if os.path.isdir(example_dir):
-    example_files = os.listdir(example_dir)
-    if example_files:
-        st.write("Or try an example:")
-        cols = st.columns(len(example_files))
-        for col, example_file in zip(cols, example_files):
-            example_path = os.path.join(example_dir, example_file)
-            with col:
-                st.image(example_path, width=100)
-                if st.button("Use this", key=example_file):
-                    selected_example = example_path
+if "selected_example" not in st.session_state:
+    st.session_state.selected_example = None
 
-image_to_predict = None
+if example_images:
+    st.write("### Or try an example")
+
+    cols = st.columns(len(example_images))
+
+    for col, example_path in zip(cols, example_images):
+        with col:
+            st.image(example_path, use_container_width=True)
+
+            if st.button("Use Image", key=example_path):
+                st.session_state.selected_example = example_path
+
+img = None
+caption = None
+
 if uploaded_file is not None:
-    image_to_predict = Image.open(uploaded_file).convert("RGB")
-elif selected_example is not None:
-    image_to_predict = Image.open(selected_example).convert("RGB")
+    img = Image.open(uploaded_file).convert("RGB")
+    caption = "Uploaded Image"
+    st.session_state.selected_example = None
 
-if image_to_predict is not None:
-    st.image(image_to_predict, caption="Input image", use_container_width=True)
+elif st.session_state.selected_example is not None:
+    img = Image.open(st.session_state.selected_example).convert("RGB")
+    caption = "Example Image"
+
+if img is not None:
+
+    st.image(img, caption=caption, use_container_width=True)
 
     with st.spinner("Predicting..."):
-        pred_labels_and_probs, pred_time = predict(image_to_predict)
+        pred_labels_and_probs, pred_time = predict(img)
 
-    # Sort and show top 5
-    top_5 = dict(
-        sorted(pred_labels_and_probs.items(), key=lambda x: x[1], reverse=True)[:5]
+    # Sort predictions
+    top5 = sorted(
+        pred_labels_and_probs.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:5]
+
+    best_label, best_prob = top5[0]
+
+    st.success(
+        f"### 🍽️ Prediction: {best_label.replace('_',' ').title()}"
     )
 
-    st.subheader("Predictions")
-    for label, prob in top_5.items():
-        st.write(f"**{label}**")
+    st.write(f"**Confidence:** {best_prob:.2%}")
+
+    st.divider()
+
+    st.subheader("Top 5 Predictions")
+
+    for label, prob in top5:
+        st.write(f"**{label.replace('_',' ').title()}**")
         st.progress(prob)
-        st.caption(f"{prob:.2%}")
+        st.write(f"{prob:.2%}")
 
-    st.info(f"Prediction time: {pred_time} seconds")
+    st.caption(f"Inference time: {pred_time:.4f} seconds")
 
-st.markdown(
-    "---\n"
-    "Created following [09. PyTorch Model Deployment]"
-    "(https://www.learnpytorch.io/09_pytorch_model_deployment/)."
-)
+else:
+    st.info("Upload an image or choose the example above.")
